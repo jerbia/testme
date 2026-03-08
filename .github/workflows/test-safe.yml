@@ -1,0 +1,68 @@
+name: "Looks scary but isn't"
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # Looks like CSE-001 (script injection) — but it's safe
+  # because the expression is in an env: block, not in run:
+  label-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title format
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          COMMENT: ${{ github.event.comment.body }}
+        run: |
+          echo "Checking: $PR_TITLE"
+          if [[ ! "$PR_TITLE" =~ ^(feat|fix|chore): ]]; then
+            echo "Bad title format"
+            exit 1
+          fi
+
+  # Looks like CSE-002 (dangerous trigger + checkout) — but it's safe
+  # because it checks out the BASE branch, not the PR head
+  safe-checkout:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      # This does NOT use ref: ${{ github.event.pull_request.head.sha }}
+      # Default checkout on pull_request_target = base branch = safe
+
+      - name: Run linter on base
+        run: npm run lint
+
+  # Looks like CSE-003 (unpinned action) — but it's safe
+  # because it's a local composite action, not a remote one
+  local-action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+      - uses: ./.github/actions/my-local-action  # local = safe, no tag hijack risk
+      - uses: docker://alpine:3.19  # Docker reference, not a GitHub action tag
+
+  # Looks like CSE-004 (excessive permissions) — but it's safe
+  # because permissions are explicitly scoped and minimal
+  # (the job inherits the top-level read-only permissions)
+  comment:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write  # only what's needed, nothing more
+    steps:
+      - name: Post comment
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: 'Checks passed!'
+            })
